@@ -44,11 +44,70 @@ dashboards backed by Tempo, Loki, Prometheus, and TimescaleDB.
 
 ## Quick start
 
+The gateway and telescope pipeline images are built locally, and both require
+the generated protobuf stubs (`gen/`) to be present before the Docker build.
+`gen/` is gitignored, so on a fresh clone you must generate it first.
+
+### 1. Prerequisites
+
+- Docker + Docker Compose
+- Go 1.22+
+- Python 3.12+ with `venv`
+- `protoc` (Protocol Buffers compiler)
+
 ```bash
-docker compose up -d
+# macOS
+brew install protobuf
+
+# Go proto plugins
+go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Python proto tools (into the project venv)
+python3 -m venv .venv
+.venv/bin/pip install grpcio-tools
 ```
 
-Open **http://localhost:3000** (anonymous admin, no password).
+### 2. Generate protobuf stubs
+
+```bash
+make proto          # generates gen/go/ and gen/python/
+```
+
+### 3. Build images and start all services
+
+```bash
+docker compose up --build -d
+```
+
+This builds the `gateway` and `chime`/`spt`/`hirax` images locally (which copy
+`gen/` in) and pulls the rest from Docker Hub. All services start in dependency
+order; the DB runs migrations automatically on first start.
+
+### 4. Open Grafana
+
+```
+http://localhost:3000
+```
+
+Anonymous admin access — no login required.
+
+---
+
+## GitHub source links in logs (optional)
+
+Every log line carries a `src=<url>#L<lineno>` suffix injected by
+`lib/python/telescope_obs/otel.py`. When `GITHUB_REPO` and `GIT_COMMIT_SHA` are
+set, Grafana's Loki derived field renders a **"View on GitHub"** link pointing to
+the exact line.
+
+```bash
+export GITHUB_REPO=https://github.com/chitrangpatel/telescope-obs
+export GIT_COMMIT_SHA=$(git rev-parse HEAD)
+
+# Restart only Grafana and the pipeline containers to pick up the new env:
+docker compose up --build -d --force-recreate grafana chime spt hirax
+```
 
 ---
 
@@ -82,26 +141,13 @@ Search for any `event_id` (UUID) to see:
 
 ---
 
-## GitHub source links in logs
-
-Every log line carries a `src=<repo-relative-path>#L<lineno>` suffix injected
-by `lib/python/telescope_obs/otel.py`.  Grafana's Loki derived field turns this
-into a **"View on GitHub"** link in the logs panel.
-
-Set these environment variables before starting (or restarting) Grafana:
-
-```bash
-export GITHUB_REPO=https://github.com/chitrangpatel/telescope-obs
-export GIT_COMMIT_SHA=$(git rev-parse HEAD)
-docker compose up -d --force-recreate grafana
-```
-
----
-
 ## Project layout
 
 ```
 proto/                   gRPC service + message definitions
+gen/                     Generated stubs — gitignored, produced by make proto
+  go/telescope/v1/       Go stubs (events.pb.go, events_grpc.pb.go)
+  python/                Python stubs (events_pb2.py, events_pb2_grpc.py)
 gateway/
   cmd/gateway/           Go service entrypoint
   internal/db/           TimescaleDB persistence layer
@@ -112,7 +158,8 @@ lib/python/telescope_obs/
   otel.py                OTel setup + source-location log factory
   metrics.py             InfraMetrics + PipelineMetrics
 telescopes/
-  chime/pipeline.py      CHIME mock (400–800 MHz, FRB)
+  Dockerfile             Shared image; PIPELINE build-arg selects the pipeline
+  chime/pipeline.py      CHIME mock
   spt/pipeline.py        SPT mock
   hirax/pipeline.py      HIRAX mock
 config/
@@ -122,11 +169,12 @@ config/
 
 ---
 
-## Regenerating protobuf stubs
+## Useful commands
 
 ```bash
-make proto-go      # → gen/go/
-make proto-python  # → gen/python/
+make up           # docker compose up --build -d
+make down         # docker compose down
+make logs         # docker compose logs -f
+make proto        # regenerate gen/ from proto/events.proto
+make proto-clean  # remove gen/
 ```
-
-Requires `protoc`, `protoc-gen-go`, `protoc-gen-go-grpc`, and `grpcio-tools`.
