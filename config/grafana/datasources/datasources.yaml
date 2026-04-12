@@ -48,7 +48,7 @@ datasources:
         - name:             SourceCode
           matcherType:      regex
           matcherRegex:     "src=([\\w/.\\-]+#L\\d+)"
-          url:              "${GITHUB_REPO:-}/blob/${GIT_COMMIT_SHA:-main}/${__value.raw}"
+          url:              "${GITHUB_REPO}/blob/${GIT_COMMIT_SHA}/${__value.raw}"
           urlDisplayLabel:  "View on GitHub"
 
   - name: TimescaleDB
