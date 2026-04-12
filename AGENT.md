@@ -1,7 +1,7 @@
 # telescope-obs — Agent Context
 
-Full-stack observability platform for fast radio burst (FRB) detection pipelines.
-Three mock radio telescopes (CHIME, SPT, HIRAX) emit OpenTelemetry traces, logs, and
+Full-stack observability platform for event tracing pipelines.
+Three mock telescope pipelines (CHIME, SPT, HIRAX) emit OpenTelemetry traces, logs, and
 metrics that are correlated and surfaced through Grafana dashboards.
 
 ## Architecture at a glance

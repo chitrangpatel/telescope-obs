@@ -1,8 +1,8 @@
 # telescope-obs
 
-Full-stack observability platform for fast radio burst (FRB) detection pipelines.
+Full-stack observability platform for event tracing pipelines.
 Correlates OpenTelemetry **traces**, **logs**, and **metrics** across three mock
-radio telescopes (CHIME, SPT, HIRAX) and exposes them through a pair of Grafana
+telescope pipelines (CHIME, SPT, HIRAX) and exposes them through a pair of Grafana
 dashboards backed by Tempo, Loki, Prometheus, and TimescaleDB.
 
 ---
