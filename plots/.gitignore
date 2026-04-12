@@ -1,0 +1,4 @@
+# Ignore all plot images except the POC waterfall sample.
+*
+!.gitignore
+!wfall.png
