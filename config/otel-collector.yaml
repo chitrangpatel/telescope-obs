@@ -1,0 +1,56 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+
+  # Attach telescope / stage / trace_id as resource attributes
+  # so Prometheus labels and Loki stream selectors are consistent.
+  resource:
+    attributes:
+      - action: upsert
+        key: service.namespace
+        value: telescope-obs
+
+exporters:
+  # Metrics → Prometheus scrape endpoint
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: telescope_obs
+
+  # Logs → Loki via its native OTLP endpoint (Loki 2.9+).
+  # trace_id and span_id are carried as OTLP log record attributes,
+  # letting Grafana correlate log lines ↔ Tempo traces automatically.
+  otlp_http/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+  # Traces → Tempo via OTLP gRPC (internal network only)
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers:  [otlp]
+      processors: [resource, batch]
+      exporters:  [otlp_grpc/tempo]
+
+    metrics:
+      receivers:  [otlp]
+      processors: [resource, batch]
+      exporters:  [prometheus]
+
+    logs:
+      receivers:  [otlp]
+      processors: [resource, batch]
+      exporters:  [otlp_http/loki]

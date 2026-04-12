@@ -1,0 +1,84 @@
+apiVersion: 1
+
+datasources:
+  - name:      Prometheus
+    type:      prometheus
+    uid:       prometheus
+    url:       http://prometheus:9090
+    isDefault: true
+    jsonData:
+      exemplarTraceIdDestinations:
+        - name:            traceID
+          datasourceUid:   tempo
+
+  - name: Loki
+    type: loki
+    uid:  loki
+    url:  http://loki:3100
+    jsonData:
+      # Two derived fields so the trace-link icon appears regardless of
+      # how the log was emitted:
+      #
+      #   matcherType: label   — OTel OTLP logs (LoggingInstrumentor path)
+      #                          Loki stores trace_id as a structured attribute;
+      #                          Grafana surfaces it directly.
+      #
+      #   matcherType: regex   — Plain stdlib logs that embed trace_id=<hex>
+      #                          in the message text (fallback filter path).
+      derivedFields:
+        # OTel OTLP logs: trace_id arrives as a structured label called traceID.
+        # The link sets the dashboard variable AND opens Tempo — the user stays
+        # on the same dashboard and the Span Tree panel re-renders inline.
+        - name:          TraceID
+          matcherType:   label
+          matcherRegex:  otelTraceID
+          url:           "/d/telescope-pipeline-health?var-trace_id=${__value.raw}"
+          datasourceUid: tempo
+        # Fallback for plain-text logs that embed trace_id=<hex> in the message.
+        - name:          TraceID_text
+          matcherType:   regex
+          matcherRegex:  "trace_id=(\\w+)"
+          url:           "/d/telescope-pipeline-health?var-trace_id=${__value.raw}"
+          datasourceUid: tempo
+        # Source code location — appended to every log body by _SourceLocationFilter
+        # in telescope_obs/otel.py as  src=<repo-relative-path>#L<lineno>.
+        # GITHUB_REPO and GIT_COMMIT_SHA are injected into the Grafana container
+        # from docker-compose; set them in your shell before docker-compose up.
+        # Example: https://github.com/your-org/telescope-obs/blob/main/telescopes/chime/pipeline.py#L128
+        - name:             SourceCode
+          matcherType:      regex
+          matcherRegex:     "src=([\\w/.\\-]+#L\\d+)"
+          url:              "${GITHUB_REPO:-}/blob/${GIT_COMMIT_SHA:-main}/${__value.raw}"
+          urlDisplayLabel:  "View on GitHub"
+
+  - name: TimescaleDB
+    type: postgres
+    uid:  timescaledb
+    url:  db:5432
+    user: telescope
+    secureJsonData:
+      password: telescope
+    jsonData:
+      database:         telescope_obs
+      sslmode:          disable
+      postgresVersion:  1600
+      timescaledb:      true
+
+  - name: Tempo
+    type: tempo
+    uid:  tempo
+    url:  http://tempo:3200
+    jsonData:
+      # Trace → logs: from any span, jump to Loki filtered by trace_id
+      tracesToLogsV2:
+        datasourceUid:   loki
+        filterByTraceID: true
+        filterBySpanID:  false
+      # Trace → metrics: service graph powered by Prometheus
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      # TraceQL search enabled
+      search:
+        hide: false

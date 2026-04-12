@@ -1,0 +1,373 @@
+{
+  "title": "Telescope Pipeline Health",
+  "uid":   "telescope-pipeline-health",
+  "tags":  ["telescope-obs"],
+  "time":  {"from": "now-1h", "to": "now"},
+  "refresh": "15s",
+  "schemaVersion": 38,
+
+  "templating": {
+    "list": [
+      {
+        "name":       "telescope",
+        "label":      "Telescope",
+        "type":       "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "definition": "label_values(telescope_obs_telescope_pipeline_events_total, telescope)",
+        "query":      "label_values(telescope_obs_telescope_pipeline_events_total, telescope)",
+        "includeAll": true,
+        "allValue":   ".*",
+        "multi":      true,
+        "current":    {}
+      },
+      {
+        "name":        "trace_id",
+        "label":       "Trace ID",
+        "type":        "textbox",
+        "description": "Paste a trace ID here (or click a trace link in the logs panel below) to render the full span tree",
+        "current":     {"value": ""},
+        "hide":        0
+      }
+    ]
+  },
+
+  "annotations": {
+    "list": [
+      {
+        "name":       "Action failures",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "expr":       "changes(telescope_obs_telescope_pipeline_actions_total{status='failure', telescope=~'$telescope'}[1m]) > 0",
+        "enable":     true,
+        "hide":       false,
+        "iconColor":  "red",
+        "step":       "60s"
+      }
+    ]
+  },
+
+  "panels": [
+
+    {
+      "id": 1,
+      "type":    "row",
+      "title":   "Science pipeline throughput",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1},
+      "collapsed": false
+    },
+
+    {
+      "id": 2,
+      "title":   "Events / second",
+      "type":    "timeseries",
+      "gridPos": {"x": 0, "y": 1, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "custom": {"lineWidth": 2}
+        }
+      },
+      "options": {"tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "expr":         "sum by (telescope) (rate(telescope_obs_telescope_pipeline_events_total{telescope=~\"$telescope\"}[1m]))",
+          "legendFormat": "{{telescope}}",
+          "refId":        "A"
+        }
+      ]
+    },
+
+    {
+      "id": 3,
+      "title":   "Candidates / second",
+      "type":    "timeseries",
+      "gridPos": {"x": 8, "y": 1, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}}},
+      "targets": [
+        {
+          "expr":         "sum by (telescope, stage) (rate(telescope_obs_telescope_pipeline_candidates_total{telescope=~\"$telescope\"}[1m]))",
+          "legendFormat": "{{telescope}} / {{stage}}",
+          "refId":        "A"
+        }
+      ]
+    },
+
+    {
+      "id": 4,
+      "title":   "Detection latency (p50 / p95 / p99)",
+      "type":    "timeseries",
+      "gridPos": {"x": 16, "y": 1, "w": 8, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {"mode": "palette-classic"}
+        }
+      },
+      "targets": [
+        {
+          "expr":         "histogram_quantile(0.50, sum by (le, telescope) (rate(telescope_obs_telescope_pipeline_detection_duration_seconds_bucket{telescope=~\"$telescope\"}[5m])))",
+          "legendFormat": "p50 {{telescope}}",
+          "refId":        "A"
+        },
+        {
+          "expr":         "histogram_quantile(0.95, sum by (le, telescope) (rate(telescope_obs_telescope_pipeline_detection_duration_seconds_bucket{telescope=~\"$telescope\"}[5m])))",
+          "legendFormat": "p95 {{telescope}}",
+          "refId":        "B"
+        },
+        {
+          "expr":         "histogram_quantile(0.99, sum by (le, telescope) (rate(telescope_obs_telescope_pipeline_detection_duration_seconds_bucket{telescope=~\"$telescope\"}[5m])))",
+          "legendFormat": "p99 {{telescope}}",
+          "refId":        "C"
+        }
+      ]
+    },
+
+    {
+      "id": 5,
+      "type":    "row",
+      "title":   "Downstream actions & errors",
+      "gridPos": {"x": 0, "y": 9, "w": 24, "h": 1},
+      "collapsed": false
+    },
+
+    {
+      "id": 6,
+      "title":   "Action success rate by type",
+      "type":    "timeseries",
+      "gridPos": {"x": 0, "y": 10, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}},
+      "targets": [
+        {
+          "expr":         "sum by (action) (rate(telescope_obs_telescope_pipeline_actions_total{status=\"success\", telescope=~\"$telescope\"}[5m])) / sum by (action) (rate(telescope_obs_telescope_pipeline_actions_total{telescope=~\"$telescope\"}[5m]))",
+          "legendFormat": "{{action}}",
+          "refId":        "A"
+        }
+      ]
+    },
+
+    {
+      "id": 7,
+      "title":   "Action failures / minute",
+      "type":    "timeseries",
+      "gridPos": {"x": 12, "y": 10, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {
+        "defaults": {
+          "color":  {"fixedColor": "red", "mode": "fixed"},
+          "custom": {"fillOpacity": 20}
+        }
+      },
+      "options": {"tooltip": {"mode": "multi"}},
+      "targets": [
+        {
+          "expr":         "sum by (telescope, action) (rate(telescope_obs_telescope_pipeline_actions_total{status=\"failure\", telescope=~\"$telescope\"}[1m])) * 60",
+          "legendFormat": "{{telescope}} / {{action}}",
+          "refId":        "A"
+        }
+      ]
+    },
+
+    {
+      "id": 30,
+      "type":    "row",
+      "title":   "Events with errors",
+      "gridPos": {"x": 0, "y": 18, "w": 24, "h": 1},
+      "collapsed": false
+    },
+
+    {
+      "id": 31,
+      "title":       "Failed downstream actions — click Trace ID to inspect",
+      "description": "Events where at least one downstream action (data_dump, voevent_alert, db_write) reported failure. Click a trace_id to populate the Span Tree below.",
+      "type":        "table",
+      "gridPos":     {"x": 0, "y": 19, "w": 24, "h": 10},
+      "datasource":  {"type": "postgres", "uid": "timescaledb"},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"filterable": true}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "trace_id"},
+            "properties": [
+              {
+                "id": "links",
+                "value": [{
+                  "title": "Open span tree",
+                  "url":   "/d/telescope-pipeline-health?var-trace_id=${__value.raw}",
+                  "targetBlank": false
+                }]
+              },
+              {"id": "custom.width", "value": 280}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "error"},
+            "properties": [
+              {"id": "custom.width", "value": 340},
+              {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "event_time"},
+            "properties": [
+              {"id": "unit", "value": "dateTimeAsLocal"},
+              {"id": "custom.width", "value": 180}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{"displayName": "event_time", "desc": true}]
+      },
+      "targets": [
+        {
+          "refId":   "A",
+          "rawSql":  "SELECT e.event_time, e.event_id, e.trace_id, e.payload->>'classification' AS classification, dr.payload->>'action' AS action, dr.payload->>'error' AS error FROM events e JOIN downstream_results dr ON dr.event_id = e.event_id WHERE dr.payload->>'status' = 'failure' AND e.event_time >= NOW() - INTERVAL '1 hour' ORDER BY e.event_time DESC LIMIT 100",
+          "format":  "table"
+        }
+      ]
+    },
+
+    {
+      "id": 8,
+      "type":    "row",
+      "title":   "Logs  —  click the chain-link icon on any log line to load its trace below",
+      "gridPos": {"x": 0, "y": 29, "w": 24, "h": 1},
+      "collapsed": false
+    },
+
+    {
+      "id": 9,
+      "title":   "Pipeline logs",
+      "type":    "logs",
+      "gridPos": {"x": 0, "y": 30, "w": 24, "h": 10},
+      "datasource": {"type": "loki", "uid": "loki"},
+      "options": {
+        "dedupStrategy":  "none",
+        "showTime":       true,
+        "wrapLogMessage": false,
+        "sortOrder":      "Descending"
+      },
+      "targets": [
+        {
+          "expr":  "{service_name=~\"telescope-($telescope)-pipeline\"} | severity_text =~ \"ERROR|WARN\"",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type":      "row",
+      "title":     "Span tree  —  paste a Trace ID above then expand this row",
+      "gridPos":   {"x": 0, "y": 40, "w": 24, "h": 1},
+      "collapsed": true,
+      "panels": [
+        {
+          "id": 21,
+          "title":       "Span tree  —  $trace_id",
+          "description": "Full span provenance: candidates → event → downstream actions. Span links connect to the diagnostic_plot trace.",
+          "type":        "traces",
+          "gridPos":     {"x": 0, "y": 30, "w": 14, "h": 18},
+          "datasource":  {"type": "tempo", "uid": "tempo"},
+          "targets": [
+            {
+              "queryType": "traceql",
+              "query":     "$trace_id",
+              "refId":     "A"
+            }
+          ]
+        },
+        {
+          "id": 22,
+          "title":       "Logs for trace  —  $trace_id",
+          "description": "Every log line emitted while a span in this trace was active. Includes INFO context and ERROR failures.",
+          "type":        "logs",
+          "gridPos":     {"x": 14, "y": 30, "w": 10, "h": 18},
+          "datasource":  {"type": "loki", "uid": "loki"},
+          "options": {
+            "dedupStrategy":  "none",
+            "showTime":       true,
+            "wrapLogMessage": true,
+            "sortOrder":      "Ascending"
+          },
+          "targets": [
+            {
+              "expr":  "{service_name=~\"telescope-.*-pipeline\"} | otelTraceID = \"$trace_id\"",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "type":    "row",
+      "title":   "Infrastructure",
+      "gridPos": {"x": 0, "y": 48, "w": 24, "h": 1},
+      "collapsed": true,
+      "panels": [
+
+        {
+          "id": 11,
+          "title":   "CPU %",
+          "type":    "timeseries",
+          "gridPos": {"x": 0, "y": 49, "w": 8, "h": 7},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}},
+          "targets": [
+            {
+              "expr":         "telescope_obs_telescope_node_cpu_percent{telescope=~\"$telescope\"}",
+              "legendFormat": "{{telescope}}",
+              "refId":        "A"
+            }
+          ]
+        },
+
+        {
+          "id": 12,
+          "title":   "Memory used",
+          "type":    "timeseries",
+          "gridPos": {"x": 8, "y": 49, "w": 8, "h": 7},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "bytes"}},
+          "targets": [
+            {
+              "expr":         "telescope_obs_telescope_node_memory_used_bytes{telescope=~\"$telescope\"}",
+              "legendFormat": "{{telescope}} used",
+              "refId":        "A"
+            },
+            {
+              "expr":         "telescope_obs_telescope_node_memory_available_bytes{telescope=~\"$telescope\"}",
+              "legendFormat": "{{telescope}} available",
+              "refId":        "B"
+            }
+          ]
+        },
+
+        {
+          "id": 13,
+          "title":   "Disk utilisation",
+          "type":    "timeseries",
+          "gridPos": {"x": 16, "y": 49, "w": 8, "h": 7},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}},
+          "targets": [
+            {
+              "expr":         "telescope_obs_telescope_node_disk_used_percent{telescope=~\"$telescope\"}",
+              "legendFormat": "{{telescope}}",
+              "refId":        "A"
+            }
+          ]
+        }
+
+      ]
+    }
+
+  ]
+}

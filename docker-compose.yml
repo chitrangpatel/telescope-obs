@@ -1,0 +1,177 @@
+services:
+
+  # ── Science database ───────────────────────────────────────────────
+  # TimescaleDB = PostgreSQL + time-series hypertables.
+  # JSONB columns absorb the google.protobuf.Struct payloads;
+  # hypertables partition candidates/events by observation_time.
+  db:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB:       telescope_obs
+      POSTGRES_USER:     telescope
+      POSTGRES_PASSWORD: telescope
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./gateway/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telescope -d telescope_obs"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Gateway (Go gRPC) ─────────────────────────────────────────────
+  # Build context is the repo root so the Dockerfile can reach gen/ and gateway/.
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    environment:
+      GATEWAY_ADDR:   ":50051"
+      DB_URL:         "postgres://telescope:telescope@db:5432/telescope_obs"
+      OTEL_ENDPOINT:  "otel-collector:4317"
+    ports:
+      - "50051:50051"
+    depends_on:
+      db:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  # ── Telescope pipeline services ────────────────────────────────────
+  # Each service uses the shared telescopes/Dockerfile; PIPELINE selects
+  # which telescope's pipeline.py is copied in.
+  # All three start after the gateway is up and send to otel-collector:4317.
+
+  chime:
+    build:
+      context: .
+      dockerfile: telescopes/Dockerfile
+      args:
+        PIPELINE: chime
+    environment:
+      GATEWAY_ADDR:   "gateway:50051"
+      OTEL_ENDPOINT:  "otel-collector:4317"
+      SCAN_INTERVAL:  "8"
+    depends_on:
+      gateway:
+        condition: service_started
+
+  spt:
+    build:
+      context: .
+      dockerfile: telescopes/Dockerfile
+      args:
+        PIPELINE: spt
+    environment:
+      GATEWAY_ADDR:   "gateway:50051"
+      OTEL_ENDPOINT:  "otel-collector:4317"
+      SCAN_INTERVAL:  "12"
+    depends_on:
+      gateway:
+        condition: service_started
+
+  hirax:
+    build:
+      context: .
+      dockerfile: telescopes/Dockerfile
+      args:
+        PIPELINE: hirax
+    environment:
+      GATEWAY_ADDR:   "gateway:50051"
+      OTEL_ENDPOINT:  "otel-collector:4317"
+      SCAN_INTERVAL:  "10"
+    depends_on:
+      gateway:
+        condition: service_started
+
+  # ── OTel Collector ─────────────────────────────────────────────────
+  # Single fan-out point: OTLP in → Prometheus + Loki + Tempo out.
+  # Pipeline services send to :4317 (gRPC) or :4318 (HTTP).
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otel/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC  (telescope services → collector)
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus scrape endpoint (collector → prometheus)
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+  # ── Prometheus ─────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
+  # ── Loki ───────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./config/loki.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
+    ports:
+      - "3100:3100"
+
+  # ── Tempo ──────────────────────────────────────────────────────────
+  # Receives traces from the OTel collector (internal :4317).
+  # Exposes query API on :3200 for Grafana.
+  tempo:
+    image: grafana/tempo:2.6.0
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    volumes:
+      - ./config/tempo.yaml:/etc/tempo/config.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP query API (Grafana datasource)
+
+  # ── Grafana ────────────────────────────────────────────────────────
+  # Prometheus + Loki + Tempo datasources provisioned automatically.
+  # Loki→Tempo and Tempo→Loki trace/log correlation wired via trace_id.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED:    "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE:   Admin
+      GF_FEATURE_TOGGLES_ENABLE:    traceqlEditor
+      # Used by the Loki datasource derived field to build GitHub permalinks.
+      # Set GITHUB_REPO in your shell before running docker-compose, e.g.:
+      #   export GITHUB_REPO=https://github.com/your-org/telescope-obs
+      # Defaults to empty (links will be disabled if not set).
+      GITHUB_REPO:      "${GITHUB_REPO:-}"
+      # Set GIT_COMMIT_SHA to pin links to a specific commit, otherwise
+      # links target the main branch.
+      GIT_COMMIT_SHA:   "${GIT_COMMIT_SHA:-main}"
+    volumes:
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+volumes:
+  db_data:
+  prometheus_data:
+  loki_data:
+  tempo_data:
+  grafana_data:
+
+networks:
+  default:
+    name: telescope-obs

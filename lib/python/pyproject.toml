@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telescope-obs-client"
+version = "0.1.0"
+description = "Client library for the telescope-obs TelemetryGateway"
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.60",
+    "protobuf>=4.0",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24",
+    "opentelemetry-instrumentation-grpc>=0.45b0",
+    "opentelemetry-instrumentation-logging>=0.45b0",
+    "opentelemetry-semantic-conventions>=0.45b0",
+    "psutil>=5.9",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["telescope_obs*"]

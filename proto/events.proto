@@ -1,0 +1,231 @@
+syntax = "proto3";
+
+package telescope.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/telescope-obs/telescope-obs/gen/go/telescope/v1;telescopev1";
+
+// ─────────────────────────────────────────────────────────────────
+// DESIGN PRINCIPLE
+//
+// This schema is intentionally telescope-agnostic.  It enforces only:
+//
+//   1. W3C trace context (trace_id / span_id) on every message so the
+//      gateway can attach OTel spans without inspecting payloads.
+//      trace_id is the primary correlation key across Tempo / Loki /
+//      Prometheus.  telescope + stage become OTel span attributes and
+//      Prometheus label dimensions.
+//
+//   2. DAG provenance: N BeamCandidates → 1 AstrophysicalEvent.
+//
+//   3. The downstream action span-binding (action_span_id) so the
+//      gateway can close the right child span from the payload status.
+//
+//   4. Late-arriving enrichment: UpdateCandidate / UpdateEvent RPCs
+//      let post-processing jobs (e.g. diagnostic plot generation) merge
+//      new fields into an existing record's payload Struct after the
+//      initial ingest.
+//
+// All science fields, classification, action type/status, and result
+// details live in google.protobuf.Struct payloads.  Their schema is
+// defined entirely by the telescope / experiment team.
+//
+// Telescope devs interact exclusively via lib/python or lib/cpp.
+// They never call these RPCs directly.
+// ─────────────────────────────────────────────────────────────────
+
+
+// ── Observability envelope ────────────────────────────────────────
+// Attached to every ingest message.
+// The gateway uses only these fields to open / continue OTel spans.
+
+message ObservationContext {
+  // W3C traceparent fields injected by the client library.
+  // A single trace_id threads:  stage1 → stage2 → clustering → actions
+  string trace_id  = 1;  // 32-hex trace-id
+  string span_id   = 2;  // 16-hex parent-id of *this* hop
+
+  string telescope       = 3;  // opaque name, e.g. "chime", "spt", "hirax"
+  uint32 beam_id         = 4;  // beam index within the array
+  string stage           = 5;  // free-form label chosen by the service
+  string service_version = 6;  // semver of the emitting binary
+
+  google.protobuf.Timestamp observation_time = 7;
+}
+
+
+// ── Beam candidate ────────────────────────────────────────────────
+// Produced by any pipeline stage (C++ or Python).
+// All detection parameters live in `payload`.
+//
+// Optional enrichment fields (e.g. diagnostic_plot_uri pointing to a
+// PNG generated after initial processing) are added later via
+// UpdateCandidate — they are not first-class fields because not every
+// telescope produces them.
+
+message BeamCandidate {
+  string             candidate_id = 1;  // UUID v4, assigned by the emitter
+  ObservationContext context      = 2;
+
+  // All science / detection fields — schema is the telescope team's choice.
+  // e.g. {"dm": 349.2, "snr": 11.4, "arrival_time_mjd": 60012.345}
+  // Post-processing may later merge: {"diagnostic_plot_uri": "file:///..."}
+  google.protobuf.Struct payload = 3;
+}
+
+
+// ── Clustering provenance ─────────────────────────────────────────
+// An edge in the DAG linking a source candidate to a formed event.
+
+message ProvenanceEdge {
+  string source_candidate_id = 1;
+  float  weight              = 2;  // association confidence [0, 1]
+  string association_method  = 3;  // free-form, e.g. "dm_coincidence"
+}
+
+
+// ── Astrophysical event ───────────────────────────────────────────
+// Produced by the clustering service.
+// The DAG (candidate_ids + provenance_edges) is always explicit.
+// Classification, best-fit parameters, and all other science fields
+// live in `payload`.
+
+message AstrophysicalEvent {
+  string event_id = 1;  // UUID v4
+  string trace_id = 2;  // same W3C trace_id as every contributing candidate
+
+  // DAG provenance — enforced by the schema
+  repeated string         candidate_ids    = 3;
+  repeated ProvenanceEdge provenance_edges = 4;
+
+  // All clustering metadata, classification, and science parameters.
+  // e.g. {"algorithm": "dbscan", "confidence": 0.94,
+  //        "classification": "frb_candidate", "best_dm": 349.2,
+  //        "contributing_telescopes": ["chime", "hirax"]}
+  // Post-processing may later merge: {"summary_plot_uri": "s3://..."}
+  google.protobuf.Struct payload = 5;
+
+  google.protobuf.Timestamp event_time = 6;
+}
+
+
+// ── Downstream action result ──────────────────────────────────────
+// Produced by the actions service (one message per action).
+// action_span_id is the child OTel span the gateway must close;
+// the gateway reads status from payload to set the span outcome.
+//
+// All action metadata lives in `payload` — schema is the actions
+// service's choice.
+// e.g. {"action": "data_dump",  "status": "success", "output_uri": "s3://..."}
+//      {"action": "voevent",    "status": "failure", "error": "broker timeout"}
+//      {"action": "db_write",   "status": "success", "record_id": "..."}
+
+message DownstreamResult {
+  string event_id       = 1;
+  string trace_id       = 2;
+  string action_span_id = 3;
+
+  google.protobuf.Struct    payload      = 4;
+  google.protobuf.Timestamp completed_at = 5;
+}
+
+
+// ─────────────────────────────────────────────────────────────────
+// TelemetryGateway — the single gRPC surface for the whole system.
+//
+// Ingest path   (telescope pipelines → gateway)
+//   SubmitCandidate        stage1 / stage2  → gateway
+//   ReportEvent            clustering       → gateway
+//   ReportDownstreamResult actions          → gateway
+//
+// Enrichment path  (post-processing jobs → gateway)
+//   UpdateCandidate   merge new fields into an existing candidate payload
+//   UpdateEvent       merge new fields into an existing event payload
+//   Typical use: diagnostic plot generation completes minutes/hours after
+//   initial ingest; job calls UpdateCandidate with
+//   {"diagnostic_plot_uri": "file:///plots/<candidate_id>.png"}
+//
+// Query path  (Grafana / debug tooling → gateway)
+//   GetCandidate / GetEvent / ListCandidates / ListEvents
+// ─────────────────────────────────────────────────────────────────
+
+// ── Ingest messages ───────────────────────────────────────────────
+
+message SubmitCandidateRequest  { BeamCandidate candidate = 1; }
+message SubmitCandidateResponse {
+  string candidate_id     = 1;
+  bool   accepted         = 2;
+  string rejection_reason = 3;  // non-empty only when accepted = false
+}
+
+message ReportEventRequest  { AstrophysicalEvent event = 1; }
+message ReportEventResponse {
+  string          event_id        = 1;
+  repeated string action_span_ids = 2;  // child spans the gateway opened
+}
+
+message ReportDownstreamResultRequest { DownstreamResult result = 1; }
+
+// ── Enrichment messages ───────────────────────────────────────────
+
+message UpdateCandidateRequest {
+  string candidate_id = 1;
+  string trace_id     = 2;  // for span correlation on the update itself
+  // Fields to shallow-merge into the existing payload Struct.
+  // Existing keys are overwritten; absent keys are left untouched.
+  google.protobuf.Struct patch = 3;
+}
+message UpdateCandidateResponse { bool applied = 1; }
+
+message UpdateEventRequest {
+  string event_id = 1;
+  string trace_id = 2;
+  google.protobuf.Struct patch = 3;
+}
+message UpdateEventResponse { bool applied = 1; }
+
+// ── Query messages ────────────────────────────────────────────────
+
+message GetCandidateRequest { string candidate_id = 1; }
+message GetEventRequest     { string event_id     = 1; }
+
+message ListCandidatesRequest {
+  string telescope  = 1;  // empty = all telescopes
+  double start_mjd  = 2;
+  double end_mjd    = 3;
+  uint32 limit      = 4;
+  string page_token = 5;
+}
+message ListCandidatesResponse {
+  repeated BeamCandidate candidates      = 1;
+  string                 next_page_token = 2;
+}
+
+message ListEventsRequest {
+  uint32 limit      = 1;
+  string page_token = 2;
+}
+message ListEventsResponse {
+  repeated AstrophysicalEvent events          = 1;
+  string                      next_page_token = 2;
+}
+
+service TelemetryGateway {
+  // ── Ingest ──────────────────────────────────────────────────────
+  rpc SubmitCandidate       (SubmitCandidateRequest)        returns (SubmitCandidateResponse);
+  rpc ReportEvent           (ReportEventRequest)            returns (ReportEventResponse);
+  rpc ReportDownstreamResult(ReportDownstreamResultRequest) returns (google.protobuf.Empty);
+
+  // ── Enrichment ───────────────────────────────────────────────────
+  rpc UpdateCandidate (UpdateCandidateRequest) returns (UpdateCandidateResponse);
+  rpc UpdateEvent     (UpdateEventRequest)     returns (UpdateEventResponse);
+
+  // ── Query ────────────────────────────────────────────────────────
+  rpc GetCandidate   (GetCandidateRequest)   returns (BeamCandidate);
+  rpc GetEvent       (GetEventRequest)       returns (AstrophysicalEvent);
+  rpc ListCandidates (ListCandidatesRequest) returns (ListCandidatesResponse);
+  rpc ListEvents     (ListEventsRequest)     returns (ListEventsResponse);
+}

@@ -1,0 +1,26 @@
+server:
+  http_listen_port: 3200
+
+# Receive traces from the OTel collector (internal network)
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+
+# Trace search config
+query_frontend:
+  search:
+    duration_slo:         5s
+    throughput_bytes_slo: 1.073741824e+09
+  trace_by_id:
+    duration_slo: 5s

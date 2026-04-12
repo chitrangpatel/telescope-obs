@@ -1,0 +1,322 @@
+{
+  "title": "Event Inspector",
+  "uid":   "telescope-event-inspector",
+  "tags":  ["telescope-obs"],
+  "time":  {"from": "now-24h", "to": "now"},
+  "refresh": "30s",
+  "schemaVersion": 38,
+
+  "templating": {
+    "list": [
+      {
+        "name":        "event_id",
+        "label":       "Event ID",
+        "type":        "textbox",
+        "description": "Paste an event_id (UUID) to inspect all its traces and logs",
+        "current":     {"value": ""},
+        "hide":        0
+      },
+      {
+        "name":        "selected_trace_id",
+        "label":       "Inspect Trace",
+        "type":        "textbox",
+        "description": "Click a trace ID in the tables below to populate this field, or paste one here directly. Defaults to the creation trace when empty.",
+        "current":     {"value": ""},
+        "hide":        0
+      },
+      {
+        "name":       "active_trace_id",
+        "label":      "Active Trace ID",
+        "type":       "query",
+        "datasource": {"type": "postgres", "uid": "timescaledb"},
+        "definition": "SELECT COALESCE(NULLIF('$selected_trace_id', ''), trace_id) FROM events WHERE event_id = '$event_id' LIMIT 1",
+        "query":      "SELECT COALESCE(NULLIF('$selected_trace_id', ''), trace_id) FROM events WHERE event_id = '$event_id' LIMIT 1",
+        "hide":       2,
+        "current":    {},
+        "refresh":    2
+      }
+    ]
+  },
+
+  "panels": [
+
+    {
+      "id": 1,
+      "type":    "row",
+      "title":   "Event details",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 1},
+      "collapsed": false
+    },
+
+    {
+      "id": 2,
+      "title":       "Event summary",
+      "description": "Core fields for this event. Click the trace_id to load its span tree and logs in the panels below.",
+      "type":        "table",
+      "gridPos":     {"x": 0, "y": 1, "w": 24, "h": 5},
+      "datasource":  {"type": "postgres", "uid": "timescaledb"},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "event_time"},
+            "properties": [
+              {"id": "unit",         "value": "dateTimeAsLocal"},
+              {"id": "custom.width", "value": 190}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "event_id"},
+            "properties": [
+              {"id": "custom.width", "value": 290}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "trace_id"},
+            "properties": [
+              {"id": "custom.width", "value": 290},
+              {
+                "id": "links",
+                "value": [{
+                  "title":       "Inspect span tree & logs below",
+                  "url":         "/d/telescope-event-inspector?var-event_id=${event_id}&var-selected_trace_id=${__value.raw}",
+                  "targetBlank": false
+                }]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{"displayName": "event_time", "desc": true}]
+      },
+      "targets": [
+        {
+          "refId":  "A",
+          "rawSql": "SELECT e.event_time, e.event_id, e.trace_id, e.payload->>'classification' AS classification, e.payload->>'source_telescope' AS telescope, ROUND((e.payload->>'dm')::numeric, 2) AS dm, ROUND((e.payload->>'snr')::numeric, 2) AS snr, array_length(e.candidate_ids, 1) AS num_candidates FROM events e WHERE e.event_id = '$event_id'",
+          "format": "table"
+        }
+      ]
+    },
+
+    {
+      "id": 3,
+      "title":       "Contributing candidates",
+      "description": "Beam candidates that were clustered into this event. Each row is one candidate observation.",
+      "type":        "table",
+      "gridPos":     {"x": 0, "y": 6, "w": 12, "h": 9},
+      "datasource":  {"type": "postgres", "uid": "timescaledb"},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "observation_time"},
+            "properties": [
+              {"id": "unit",         "value": "dateTimeAsLocal"},
+              {"id": "custom.width", "value": 190}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "candidate_id"},
+            "properties": [
+              {"id": "custom.width", "value": 290}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{"displayName": "observation_time", "desc": false}]
+      },
+      "targets": [
+        {
+          "refId":  "A",
+          "rawSql": "SELECT c.candidate_id, c.telescope, c.beam_id, c.stage, c.observation_time, ROUND((c.payload->>'dm')::numeric, 2) AS dm, ROUND((c.payload->>'snr')::numeric, 2) AS snr FROM events e CROSS JOIN LATERAL unnest(e.candidate_ids) AS cid LEFT JOIN candidates c ON c.candidate_id = cid WHERE e.event_id = '$event_id' ORDER BY c.observation_time",
+          "format": "table"
+        }
+      ]
+    },
+
+    {
+      "id": 4,
+      "title":       "All traces — click to inspect span tree & logs below",
+      "description": "Every W3C trace that has touched this event (creation, async actions, re-analysis, etc.). Clicking a trace_id loads its span tree and logs in the panels at the bottom of this page.",
+      "type":        "table",
+      "gridPos":     {"x": 12, "y": 6, "w": 12, "h": 9},
+      "datasource":  {"type": "postgres", "uid": "timescaledb"},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "recorded_at"},
+            "properties": [
+              {"id": "unit",         "value": "dateTimeAsLocal"},
+              {"id": "custom.width", "value": 190}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "trace_id"},
+            "properties": [
+              {"id": "custom.width", "value": 290},
+              {
+                "id": "links",
+                "value": [{
+                  "title":       "Inspect span tree & logs below",
+                  "url":         "/d/telescope-event-inspector?var-event_id=${event_id}&var-selected_trace_id=${__value.raw}",
+                  "targetBlank": false
+                }]
+              }
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "operation"},
+            "properties": [
+              {"id": "custom.width", "value": 160}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{"displayName": "recorded_at", "desc": false}]
+      },
+      "targets": [
+        {
+          "refId":  "A",
+          "rawSql": "SELECT et.trace_id, et.operation, et.recorded_at FROM event_traces et WHERE et.event_id = '$event_id' ORDER BY et.recorded_at ASC",
+          "format": "table"
+        }
+      ]
+    },
+
+    {
+      "id": 5,
+      "type":    "row",
+      "title":   "Downstream results",
+      "gridPos": {"x": 0, "y": 15, "w": 24, "h": 1},
+      "collapsed": false
+    },
+
+    {
+      "id": 6,
+      "title":       "Downstream action results",
+      "description": "Outcomes of every async action triggered by this event (data_dump, voevent_alert, db_write). Click a trace_id to inspect that action's span tree and logs below.",
+      "type":        "table",
+      "gridPos":     {"x": 0, "y": 16, "w": 24, "h": 8},
+      "datasource":  {"type": "postgres", "uid": "timescaledb"},
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "completed_at"},
+            "properties": [
+              {"id": "unit",         "value": "dateTimeAsLocal"},
+              {"id": "custom.width", "value": 190}
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "trace_id"},
+            "properties": [
+              {"id": "custom.width", "value": 290},
+              {
+                "id": "links",
+                "value": [{
+                  "title":       "Inspect span tree & logs below",
+                  "url":         "/d/telescope-event-inspector?var-event_id=${event_id}&var-selected_trace_id=${__value.raw}",
+                  "targetBlank": false
+                }]
+              }
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "status"},
+            "properties": [
+              {"id": "custom.width", "value": 90},
+              {
+                "id": "custom.displayMode",
+                "value": "color-background"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {"color": "green", "value": null},
+                    {"color": "red",   "value": null}
+                  ]
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {"type": "value", "options": {"success": {"color": "green", "index": 0}}},
+                  {"type": "value", "options": {"failure": {"color": "red",   "index": 1}}}
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {"id": "byName", "options": "error"},
+            "properties": [
+              {"id": "custom.width", "value": 360}
+            ]
+          }
+        ]
+      },
+      "options": {
+        "sortBy": [{"displayName": "completed_at", "desc": false}]
+      },
+      "targets": [
+        {
+          "refId":  "A",
+          "rawSql": "SELECT dr.trace_id, dr.payload->>'action' AS action, dr.payload->>'status' AS status, dr.payload->>'error' AS error, dr.completed_at FROM downstream_results dr WHERE dr.event_id = '$event_id' ORDER BY dr.completed_at ASC",
+          "format": "table"
+        }
+      ]
+    },
+
+    {
+      "id": 7,
+      "type":    "row",
+      "title":   "Span tree & logs — $active_trace_id",
+      "gridPos": {"x": 0, "y": 24, "w": 24, "h": 1},
+      "collapsed": false
+    },
+
+    {
+      "id": 8,
+      "title":       "Span tree — $active_trace_id",
+      "description": "Full span tree for the selected trace. Defaults to the creation trace on first load. Click any trace_id in the tables above to switch.",
+      "type":        "traces",
+      "gridPos":     {"x": 0, "y": 25, "w": 14, "h": 20},
+      "datasource":  {"type": "tempo", "uid": "tempo"},
+      "targets": [
+        {
+          "queryType": "traceql",
+          "query":     "$active_trace_id",
+          "refId":     "A"
+        }
+      ]
+    },
+
+    {
+      "id": 9,
+      "title":       "Logs — $active_trace_id",
+      "description": "Every log line emitted while a span in the selected trace was active. Click a different trace_id in the tables above to switch.",
+      "type":        "logs",
+      "gridPos":     {"x": 14, "y": 25, "w": 10, "h": 20},
+      "datasource":  {"type": "loki", "uid": "loki"},
+      "options": {
+        "dedupStrategy":  "none",
+        "showTime":       true,
+        "wrapLogMessage": true,
+        "sortOrder":      "Ascending"
+      },
+      "targets": [
+        {
+          "expr":  "{service_name=~\"telescope-.*-pipeline\"} | otelTraceID = \"$active_trace_id\"",
+          "refId": "A"
+        }
+      ]
+    }
+
+  ]
+}

@@ -1,0 +1,20 @@
+# Generated proto code
+gen/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+dist/
+*.egg-info/
+
+# Go
+gateway/gateway
+actions/actions
+
+# Docker
+.env
+
+# macOS
+.DS_Store
