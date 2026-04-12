@@ -191,6 +191,20 @@
         },
         "overrides": [
           {
+            "matcher": {"id": "byName", "options": "event_id"},
+            "properties": [
+              {
+                "id": "links",
+                "value": [{
+                  "title": "Inspect event",
+                  "url":   "/d/telescope-event-inspector?var-event_id=${__value.raw}",
+                  "targetBlank": false
+                }]
+              },
+              {"id": "custom.width", "value": 280}
+            ]
+          },
+          {
             "matcher": {"id": "byName", "options": "trace_id"},
             "properties": [
               {
