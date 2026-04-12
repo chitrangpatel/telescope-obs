@@ -198,7 +198,7 @@
                 "value": [{
                   "title": "Inspect event",
                   "url":   "/d/telescope-event-inspector?var-event_id=${__value.raw}",
-                  "targetBlank": false
+                  "targetBlank": true
                 }]
               },
               {"id": "custom.width", "value": 280}
