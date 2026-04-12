@@ -52,7 +52,7 @@ datasources:
         - name:             SourceCode
           matcherType:      regex
           matcherRegex:     "src=(https://\\S+)"
-          url:              "${__value.raw}"
+          url:              "$${__value.raw}"
           urlDisplayLabel:  "View on GitHub"
 
   - name: TimescaleDB

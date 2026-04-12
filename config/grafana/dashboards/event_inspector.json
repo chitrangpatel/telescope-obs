@@ -20,9 +20,9 @@
         "name":        "selected_trace_id",
         "label":       "Inspect Trace",
         "type":        "textbox",
-        "description": "Click a trace ID in the tables below to populate this field, or paste one here directly. Defaults to the creation trace when empty.",
+        "description": "Set via clicking a trace ID in the tables below. Defaults to the creation trace when empty.",
         "current":     {"value": ""},
-        "hide":        0
+        "hide":        2
       },
       {
         "name":       "active_trace_id",
