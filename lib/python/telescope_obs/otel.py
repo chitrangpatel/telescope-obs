@@ -1,6 +1,7 @@
 """OpenTelemetry initialisation for telescope pipeline services."""
 
 import logging
+import os
 import re
 
 from opentelemetry import metrics, trace
@@ -142,21 +143,37 @@ def _normalize_path(pathname: str, filename: str) -> str:
 
 
 def _install_source_location_factory() -> None:
-    """Chain a log-record factory that appends ``src=<path>#L<lineno>`` to
-    every log message body so the code location is visible in Loki and the
-    Grafana derived field can extract it to build a GitHub permalink."""
+    """Chain a log-record factory that appends a ``src=`` tag to every log
+    message body so the code location is visible in Loki.
+
+    When GITHUB_REPO and GIT_COMMIT_SHA are set in the environment the tag
+    is a full permalink:
+        src=https://github.com/org/repo/blob/<sha>/path/file.py#L42
+
+    The Grafana Loki derived field captures the full URL and uses it
+    directly as the href, avoiding the %23 encoding issue that arises when
+    only the path is captured and a # fragment is appended by a template.
+
+    When the env vars are absent the tag falls back to the repo-relative path:
+        src=telescopes/chime/pipeline.py#L42
+    """
+    github_repo    = os.environ.get("GITHUB_REPO", "").rstrip("/")
+    git_commit_sha = os.environ.get("GIT_COMMIT_SHA", "")
     _prev = logging.getLogRecordFactory()
 
     def _factory(name, level, fn, lno, msg, args, exc_info,
                  func=None, sinfo=None):
         record = _prev(name, level, fn, lno, msg, args, exc_info, func, sinfo)
         rel = _normalize_path(record.pathname, record.filename)
-        # Pre-resolve %-style args now; set args=None so no handler double-formats.
         try:
             body = record.getMessage()
         except Exception:
             body = str(record.msg)
-        record.msg = f"{body}  src={rel}#L{record.lineno}"
+        if github_repo and git_commit_sha:
+            src = f"{github_repo}/blob/{git_commit_sha}/{rel}#L{record.lineno}"
+        else:
+            src = f"{rel}#L{record.lineno}"
+        record.msg = f"{body}  src={src}"
         record.args = None
         return record
 

@@ -45,10 +45,14 @@ datasources:
         # GITHUB_REPO and GIT_COMMIT_SHA are injected into the Grafana container
         # from docker-compose; set them in your shell before docker-compose up.
         # Example: https://github.com/your-org/telescope-obs/blob/main/telescopes/chime/pipeline.py#L128
+        # Source code location — appended to every log body by otel.py as
+        #   src=https://github.com/org/repo/blob/<sha>/path/file.py#L42
+        # The full URL is captured and used directly as the href so that
+        # Grafana never has to encode the # fragment (which breaks GitHub).
         - name:             SourceCode
           matcherType:      regex
-          matcherRegex:     "src=([\\w/.\\-]+#L\\d+)"
-          url:              "${GITHUB_REPO}/blob/${GIT_COMMIT_SHA}/${__value.raw}"
+          matcherRegex:     "src=(https://\\S+)"
+          url:              "${__value.raw}"
           urlDisplayLabel:  "View on GitHub"
 
   - name: TimescaleDB
