@@ -143,16 +143,6 @@ services:
     ports:
       - "3200:3200"   # Tempo HTTP query API (Grafana datasource)
 
-  # ── Plot server ────────────────────────────────────────────────────
-  # Serves diagnostic plot images from ./plots over HTTP.
-  # Grafana Text panels load images from http://plot-server:8080/<filename>.
-  plot-server:
-    image: nginx:alpine
-    volumes:
-      - ./plots:/usr/share/nginx/html:ro
-    ports:
-      - "8080:80"
-
   # ── Grafana ────────────────────────────────────────────────────────
   # Prometheus + Loki + Tempo datasources provisioned automatically.
   # Loki→Tempo and Tempo→Loki trace/log correlation wired via trace_id.

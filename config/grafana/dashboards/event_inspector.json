@@ -53,7 +53,7 @@
       "title":       "Event summary",
       "description": "Core fields for this event. Click the trace_id to load its span tree and logs in the panels below.",
       "type":        "table",
-      "gridPos":     {"x": 0, "y": 1, "w": 16, "h": 5},
+      "gridPos":     {"x": 0, "y": 1, "w": 24, "h": 5},
       "datasource":  {"type": "postgres", "uid": "timescaledb"},
       "fieldConfig": {
         "defaults": {},
@@ -97,18 +97,6 @@
           "format": "table"
         }
       ]
-    },
-
-    {
-      "id": 10,
-      "title":       "Diagnostic plot",
-      "description": "Waterfall / dedispersion plot for this event.",
-      "type":        "text",
-      "gridPos":     {"x": 16, "y": 1, "w": 8, "h": 14},
-      "options": {
-        "mode":    "html",
-        "content": "<div style=\"display:flex;align-items:center;justify-content:center;height:100%\"><img src=\"http://localhost:8080/wfall.png\" style=\"max-width:100%;max-height:100%;object-fit:contain\" /></div>"
-      }
     },
 
     {
